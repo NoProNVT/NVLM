@@ -40,8 +40,7 @@ def evaluate_model():
     model = EndoReportGenerator(
         vision_encoder=vision_encoder,
         llm_model_name_or_path=llm_name,
-        vision_dim=768, 
-        prefix_length=10
+        vision_dim=768
     ).to(device)
     
     # Load trained mapping network weights
@@ -85,24 +84,23 @@ def evaluate_model():
         question = item["question"]
         target = item["answer"]
         
-        prompt = f"Question: {question} Answer: "
+        prompt = f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
         input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
         attention_mask = torch.ones_like(input_ids).to(device)
         
         # Inference / Generation logic
         with torch.no_grad():
             vision_features = model.vision_encoder(image)
-            if vision_features.dim() > 2:
-                vision_features = vision_features.mean(dim=1)
             prefix_embeds = model.mapping_network(vision_features)
             
             # Khởi tạo embedding cho generation
-            inputs_embeds = model.llm.get_input_embeddings()(input_ids)
+            inputs_embeds = model.llm.base_model.model.get_input_embeddings()(input_ids)
             prefix_embeds = prefix_embeds.to(inputs_embeds.dtype)
             inputs_embeds = torch.cat((prefix_embeds, inputs_embeds), dim=1)
             
             # Tạo attention_mask tương ứng với inputs_embeds mới
-            prefix_attention_mask = torch.ones((1, prefix_embeds.shape[1]), dtype=attention_mask.dtype, device=device)
+            prefix_length = prefix_embeds.shape[1]
+            prefix_attention_mask = torch.ones((1, prefix_length), dtype=attention_mask.dtype, device=device)
             full_attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
             
             # Simple greedy generation logic (demo)

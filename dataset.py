@@ -37,7 +37,7 @@ class KvasirVQADataset(Dataset):
         answer = item['text']
         
         # Prepare text prompt for the LLM
-        prompt = f"Question: {question} Answer: "
+        prompt = f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
         
         # Tokenize the input and the target
         if self.tokenizer:

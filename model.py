@@ -1,28 +1,25 @@
 import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM
+from peft import LoraConfig, get_peft_model
 
 class MappingNetwork(nn.Module):
-    def __init__(self, vision_dim, llm_dim, prefix_length=10):
+    def __init__(self, vision_dim, llm_dim):
         super().__init__()
-        self.prefix_length = prefix_length
-        # A simple MLP mapping network as a starting point. 
-        # A Transformer based mapping network can also be used as in ClipCap.
+        # A 2-layer MLP mapping network like LLaVA
         self.mapper = nn.Sequential(
-            nn.Linear(vision_dim, llm_dim * prefix_length),
+            nn.Linear(vision_dim, llm_dim),
             nn.GELU(),
-            nn.Linear(llm_dim * prefix_length, llm_dim * prefix_length)
+            nn.Linear(llm_dim, llm_dim)
         )
-        self.llm_dim = llm_dim
 
     def forward(self, vision_features):
-        # vision_features: (batch, vision_dim)
-        mapped = self.mapper(vision_features) # (batch, llm_dim * prefix_length)
-        mapped = mapped.view(-1, self.prefix_length, self.llm_dim) # (batch, prefix_length, llm_dim)
+        # vision_features: (batch, num_patches, vision_dim)
+        mapped = self.mapper(vision_features) # (batch, num_patches, llm_dim)
         return mapped
 
 class EndoReportGenerator(nn.Module):
-    def __init__(self, vision_encoder, llm_model_name_or_path, vision_dim=1024, prefix_length=10):
+    def __init__(self, vision_encoder, llm_model_name_or_path, vision_dim=768):
         super().__init__()
         
         # 1. Vision Encoder
@@ -38,28 +35,35 @@ class EndoReportGenerator(nn.Module):
             torch_dtype=torch.float16,
             device_map="auto"
         )
-        # Freeze LLM
-        for param in self.llm.parameters():
-            param.requires_grad = False
+        
+        # Apply LoRA to LLM
+        lora_config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
+        self.llm = get_peft_model(self.llm, lora_config)
+        self.llm.print_trainable_parameters()
             
-        llm_dim = self.llm.config.hidden_size
+        # peft model uses base_model.model internally
+        llm_dim = self.llm.base_model.model.config.hidden_size
         
         # 3. Mapping Network
-        self.mapping_network = MappingNetwork(vision_dim, llm_dim, prefix_length)
+        self.mapping_network = MappingNetwork(vision_dim, llm_dim)
         
     def forward(self, pixel_values, input_ids, attention_mask, labels=None):
         # Extract vision features
         with torch.no_grad():
             vision_features = self.vision_encoder(pixel_values)
-            # Assuming vision_features is (batch, dim). If it returns a sequence, we might need pooling
-            if vision_features.dim() > 2:
-                vision_features = vision_features.mean(dim=1)
                 
         # Get visual prefixes
         prefix_embeds = self.mapping_network(vision_features) # (batch, prefix_length, llm_dim)
         
         # Get word embeddings from LLM
-        inputs_embeds = self.llm.get_input_embeddings()(input_ids) # (batch, seq_len, llm_dim)
+        inputs_embeds = self.llm.base_model.model.get_input_embeddings()(input_ids) # (batch, seq_len, llm_dim)
         
         # Đảm bảo cùng kiểu dữ liệu (tránh lỗi Float và Half)
         prefix_embeds = prefix_embeds.to(inputs_embeds.dtype)
@@ -67,14 +71,16 @@ class EndoReportGenerator(nn.Module):
         # Concatenate prefix embeddings with word embeddings
         inputs_embeds = torch.cat((prefix_embeds, inputs_embeds), dim=1) # (batch, prefix_length + seq_len, llm_dim)
         
+        prefix_length = prefix_embeds.shape[1]
+        
         # Extend attention mask
         batch_size = attention_mask.shape[0]
-        prefix_attention_mask = torch.ones(batch_size, self.mapping_network.prefix_length, device=attention_mask.device)
+        prefix_attention_mask = torch.ones(batch_size, prefix_length, device=attention_mask.device)
         attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
         
         # Extend labels
         if labels is not None:
-            prefix_labels = torch.full((batch_size, self.mapping_network.prefix_length), -100, dtype=torch.long, device=labels.device)
+            prefix_labels = torch.full((batch_size, prefix_length), -100, dtype=torch.long, device=labels.device)
             labels = torch.cat((prefix_labels, labels), dim=1)
             
         # Forward through LLM

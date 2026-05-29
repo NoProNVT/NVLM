@@ -198,7 +198,7 @@ class VisionTransformer(nn.Module):
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
-        return x[:, 0]
+        return x[:, 1:]
 
 def vit_tiny(patch_size=16, **kwargs):
     model = VisionTransformer(

@@ -60,13 +60,14 @@ def main():
     model = EndoReportGenerator(
         vision_encoder=vision_encoder,
         llm_model_name_or_path=llm_name,
-        vision_dim=768, 
-        prefix_length=10
+        vision_dim=768
     ).to(device)
     
     # 4. Dataset & DataLoader
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
