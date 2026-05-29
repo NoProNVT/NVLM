@@ -1,0 +1,10 @@
+torch>=1.13.1
+torchvision>=0.14.1
+transformers
+accelerate
+pillow
+tqdm
+nltk
+rouge-score
+peft
+timm==0.9.7
