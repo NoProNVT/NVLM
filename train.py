@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from transformers import AutoTokenizer
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 
 import sys
@@ -51,7 +52,7 @@ def main():
     vision_encoder = load_endofm(checkpoint_path, device)
     
     # 2. Tokenizer & LLM
-    llm_name = "Qwen/Qwen1.5-0.5B" 
+    llm_name = "Qwen/Qwen2.5-7B-Instruct" 
     tokenizer = AutoTokenizer.from_pretrained(llm_name)
     tokenizer.pad_token = tokenizer.eos_token
     
@@ -83,12 +84,14 @@ def main():
     
     train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
     
-    # 5. Optimizer (Chỉ train Mapping Network)
+    # 5. Optimizer (Train Mapping Network & LoRA)
     trainable_params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = AdamW(trainable_params, lr=1e-4)
+    optimizer = AdamW(trainable_params, lr=5e-5, weight_decay=0.01)
     
     # 6. Training Loop
-    epochs = 5
+    epochs = 10
+    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
+    
     for epoch in range(epochs):
         model.train()
         total_loss = 0
@@ -110,17 +113,26 @@ def main():
             
             loss = outputs.loss
             loss.backward()
+            
+            # Gradient clipping để ổn định Loss
+            torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
+            
             optimizer.step()
             
             total_loss += loss.item()
             progress.set_postfix({"loss": loss.item()})
             
+        scheduler.step()
         print(f"Epoch {epoch+1} Average Loss: {total_loss / len(train_loader):.4f}")
         
+        # Lưu Checkpoint MỖI EPOCH (Gồm cả Mapping Network và LoRA)
+        epoch_dir = f"checkpoints/epoch_{epoch+1}"
+        os.makedirs(epoch_dir, exist_ok=True)
+        torch.save(model.mapping_network.state_dict(), f"{epoch_dir}/mapping_network.pth")
+        model.llm.save_pretrained(f"{epoch_dir}/lora_weights")
+        print(f"Đã lưu checkpoint tại {epoch_dir}")
+        
     print("Hoàn tất huấn luyện!")
-    # Tùy chọn lưu lại weights
-    os.makedirs("checkpoints", exist_ok=True)
-    torch.save(model.mapping_network.state_dict(), "checkpoints/mapping_network.pth")
 
 if __name__ == "__main__":
     main()

@@ -33,7 +33,7 @@ def evaluate_model():
     checkpoint_path = "checkpoints/endofm_lv.pth"
     vision_encoder = load_endofm(checkpoint_path, device)
     
-    llm_name = "Qwen/Qwen1.5-0.5B" 
+    llm_name = "Qwen/Qwen2.5-7B-Instruct" 
     tokenizer = AutoTokenizer.from_pretrained(llm_name)
     tokenizer.pad_token = tokenizer.eos_token
     
@@ -43,13 +43,23 @@ def evaluate_model():
         vision_dim=768
     ).to(device)
     
-    # Load trained mapping network weights
-    mapping_ckpt = "checkpoints/mapping_network.pth"
+    # Load trained mapping network & LoRA weights
+    epoch_to_eval = 4 # Tùy chỉnh epoch muốn đánh giá ở đây
+    epoch_dir = f"checkpoints/epoch_{epoch_to_eval}"
+    mapping_ckpt = f"{epoch_dir}/mapping_network.pth"
+    lora_ckpt = f"{epoch_dir}/lora_weights"
+    
     if os.path.exists(mapping_ckpt):
         model.mapping_network.load_state_dict(torch.load(mapping_ckpt, map_location=device))
-        print("Đã tải trọng số Mapping Network.")
+        print(f"Đã tải trọng số Mapping Network từ {epoch_dir}.")
     else:
         print("Chưa có trọng số Mapping Network. Sẽ đánh giá model chưa được train.")
+        
+    if os.path.exists(lora_ckpt):
+        model.llm.load_adapter(lora_ckpt)
+        print(f"Đã tải trọng số LoRA từ {epoch_dir}.")
+    else:
+        print("Chưa có trọng số LoRA.")
         
     model.eval()
     

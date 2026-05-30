@@ -17,6 +17,7 @@ dependencies = [
     "rouge-score",
     "peft",
     "timm==0.9.7",
+    "bitsandbytes>=0.49.2",
 ]
 
 [tool.uv]

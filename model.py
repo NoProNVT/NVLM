@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model
 
 class MappingNetwork(nn.Module):
@@ -29,11 +29,19 @@ class EndoReportGenerator(nn.Module):
             param.requires_grad = False
             
         # 2. LLM
-        print(f"Loading LLM: {llm_model_name_or_path}")
+        print(f"Loading LLM: {llm_model_name_or_path} with 4-bit Quantization (QLoRA)")
+        
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4"
+        )
+        
         self.llm = AutoModelForCausalLM.from_pretrained(
             llm_model_name_or_path, 
-            torch_dtype=torch.float16,
-            device_map="auto"
+            quantization_config=quantization_config,
+            device_map={"": torch.cuda.current_device()} if torch.cuda.is_available() else None
         )
         
         # Apply LoRA to LLM
