@@ -54,9 +54,12 @@ class EndoReportGenerator(nn.Module):
             task_type="CAUSAL_LM"
         )
         self.llm = get_peft_model(self.llm, lora_config)
-        self.llm.print_trainable_parameters()
+        
+        # Bật Gradient Checkpointing để tiết kiệm tối đa VRAM
+        if hasattr(self.llm, "gradient_checkpointing_enable"):
+            self.llm.gradient_checkpointing_enable()
             
-        # peft model uses base_model.model internally
+        self.llm.print_trainable_parameters()
         llm_dim = self.llm.base_model.model.config.hidden_size
         
         # 3. Mapping Network

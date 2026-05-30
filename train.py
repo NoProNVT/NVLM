@@ -82,7 +82,8 @@ def main():
         max_length=128
     )
     
-    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
+    gradient_accumulation_steps = 4
     
     # 5. Optimizer (Train Mapping Network & LoRA)
     trainable_params = [p for p in model.parameters() if p.requires_grad]
@@ -96,8 +97,7 @@ def main():
         model.train()
         total_loss = 0
         progress = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}")
-        for batch in progress:
-            optimizer.zero_grad()
+        for step, batch in enumerate(progress):
             
             pixel_values = batch["pixel_values"].to(device)
             input_ids = batch["input_ids"].to(device)
@@ -111,16 +111,18 @@ def main():
                 labels=labels
             )
             
-            loss = outputs.loss
+            # Gradient Accumulation
+            loss = outputs.loss / gradient_accumulation_steps
             loss.backward()
             
-            # Gradient clipping để ổn định Loss
-            torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
+            if (step + 1) % gradient_accumulation_steps == 0 or (step + 1) == len(train_loader):
+                # Gradient clipping để ổn định Loss
+                torch.nn.utils.clip_grad_norm_(trainable_params, max_norm=1.0)
+                optimizer.step()
+                optimizer.zero_grad()
             
-            optimizer.step()
-            
-            total_loss += loss.item()
-            progress.set_postfix({"loss": loss.item()})
+            total_loss += (loss.item() * gradient_accumulation_steps)
+            progress.set_postfix({"loss": loss.item() * gradient_accumulation_steps})
             
         scheduler.step()
         print(f"Epoch {epoch+1} Average Loss: {total_loss / len(train_loader):.4f}")
