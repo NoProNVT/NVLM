@@ -46,16 +46,16 @@ class EndoReportGenerator(nn.Module):
         
         # Apply LoRA to LLM
         lora_config = LoraConfig(
-            r=8,
-            lora_alpha=16,
-            target_modules=["q_proj", "v_proj"],
+            r=16,
+            lora_alpha=64,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
             lora_dropout=0.05,
             bias="none",
             task_type="CAUSAL_LM"
         )
         self.llm = get_peft_model(self.llm, lora_config)
         
-        # Bật Gradient Checkpointing để tiết kiệm tối đa VRAM
+        # Enable Gradient Checkpointing to maximize VRAM savings
         if hasattr(self.llm, "gradient_checkpointing_enable"):
             self.llm.gradient_checkpointing_enable()
             
@@ -76,7 +76,7 @@ class EndoReportGenerator(nn.Module):
         # Get word embeddings from LLM
         inputs_embeds = self.llm.base_model.model.get_input_embeddings()(input_ids) # (batch, seq_len, llm_dim)
         
-        # Đảm bảo cùng kiểu dữ liệu (tránh lỗi Float và Half)
+        # Ensure matching data types (avoid Float and Half mismatches)
         prefix_embeds = prefix_embeds.to(inputs_embeds.dtype)
         
         # Concatenate prefix embeddings with word embeddings

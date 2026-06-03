@@ -44,22 +44,22 @@ def evaluate_model():
     ).to(device)
     
     # Load trained mapping network & LoRA weights
-    epoch_to_eval = 4 # Tùy chỉnh epoch muốn đánh giá ở đây
+    epoch_to_eval = 4 # Customize the epoch you want to evaluate here
     epoch_dir = f"checkpoints/epoch_{epoch_to_eval}"
     mapping_ckpt = f"{epoch_dir}/mapping_network.pth"
     lora_ckpt = f"{epoch_dir}/lora_weights"
     
     if os.path.exists(mapping_ckpt):
         model.mapping_network.load_state_dict(torch.load(mapping_ckpt, map_location=device))
-        print(f"Đã tải trọng số Mapping Network từ {epoch_dir}.")
+        print(f"Loaded Mapping Network weights from {epoch_dir}.")
     else:
-        print("Chưa có trọng số Mapping Network. Sẽ đánh giá model chưa được train.")
+        print("No Mapping Network weights found. Evaluating untrained model.")
         
     if os.path.exists(lora_ckpt):
         model.llm.load_adapter(lora_ckpt)
-        print(f"Đã tải trọng số LoRA từ {epoch_dir}.")
+        print(f"Loaded LoRA weights from {epoch_dir}.")
     else:
-        print("Chưa có trọng số LoRA.")
+        print("No LoRA weights found.")
         
     model.eval()
     
@@ -75,7 +75,7 @@ def evaluate_model():
         json_path=os.path.join(base_dir, "val", "dataset.json"),
         image_dir=os.path.join(base_dir, "val"),
         transform=transform,
-        tokenizer=None # Trả về dạng thô để tiện xử lý text generation
+        tokenizer=None # Return raw data for easy text generation handling
     )
     
     scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeL'], use_stemmer=True)
@@ -87,14 +87,15 @@ def evaluate_model():
     
     num_samples = len(val_dataset)
     
-    print(f"Đang tiến hành đánh giá trên {num_samples} samples...")
+    print(f"Evaluating {num_samples} samples...")
     for idx in tqdm(range(num_samples)):
         item = val_dataset[idx]
-        image = item["image"].unsqueeze(0).to(device) # Thêm batch dim
+        image = item["image"].unsqueeze(0).to(device) # Add batch dim
         question = item["question"]
         target = item["answer"]
         
-        prompt = f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
+        system_prompt = "You are a medical vision-language assistant; given an endoscopic image and a clinical question that may ask about one or more findings, provide a concise, clinically accurate response addressing all parts of the question in natural-sounding medical language as if spoken by a doctor in a single sentence."
+        prompt = f"<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
         input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
         attention_mask = torch.ones_like(input_ids).to(device)
         
@@ -103,12 +104,12 @@ def evaluate_model():
             vision_features = model.vision_encoder(image)
             prefix_embeds = model.mapping_network(vision_features)
             
-            # Khởi tạo embedding cho generation
+            # Initialize embeddings for generation
             inputs_embeds = model.llm.base_model.model.get_input_embeddings()(input_ids)
             prefix_embeds = prefix_embeds.to(inputs_embeds.dtype)
             inputs_embeds = torch.cat((prefix_embeds, inputs_embeds), dim=1)
             
-            # Tạo attention_mask tương ứng với inputs_embeds mới
+            # Create corresponding attention_mask for new inputs_embeds
             prefix_length = prefix_embeds.shape[1]
             prefix_attention_mask = torch.ones((1, prefix_length), dtype=attention_mask.dtype, device=device)
             full_attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
@@ -120,7 +121,7 @@ def evaluate_model():
             # Qwen uses 151643 for eos_token usually
             max_new_tokens = 50
             
-            # Cách an toàn để generate từ embeddings tùy chỉnh:
+            # Safe way to generate from custom embeddings:
             outputs = model.llm.generate(
                 inputs_embeds=inputs_embeds,
                 attention_mask=full_attention_mask,
@@ -149,7 +150,7 @@ def evaluate_model():
         except:
             pass
 
-    print("\n=== KẾT QUẢ ĐÁNH GIÁ (Kvasir-VQA Metrics) ===")
+    print("\n=== EVALUATION RESULTS (Kvasir-VQA Metrics) ===")
     print(f"BLEU-4 : {total_bleu / num_samples:.4f}")
     print(f"ROUGE-1: {total_rouge1 / num_samples:.4f}")
     print(f"ROUGE-2: {total_rouge2 / num_samples:.4f}")

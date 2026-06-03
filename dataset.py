@@ -20,14 +20,14 @@ class KvasirVQADataset(Dataset):
         item = self.data[idx]
         image_path = os.path.join(self.image_dir, item['image'].replace("images/", ""))
         
-        # Xử lý trường hợp ảnh không tồn tại để tránh lỗi
+        # Handle non-existent image paths to prevent errors
         if not os.path.exists(image_path):
             image_path = os.path.join(self.image_dir, item['image'])
             
         try:
             image = Image.open(image_path).convert('RGB')
         except:
-            # Fallback nếu đường dẫn ảnh bị sai định dạng
+            # Fallback if the image path is formatted incorrectly
             image = Image.new('RGB', (224, 224))
             
         if self.transform:
@@ -37,7 +37,8 @@ class KvasirVQADataset(Dataset):
         answer = item['text']
         
         # Prepare text prompt for the LLM
-        prompt = f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
+        system_prompt = "You are a medical vision-language assistant; given an endoscopic image and a clinical question that may ask about one or more findings, provide a concise, clinically accurate response addressing all parts of the question in natural-sounding medical language as if spoken by a doctor in a single sentence."
+        prompt = f"<|im_start|>system\n{system_prompt}<|im_end|>\n<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
         
         # Tokenize the input and the target
         if self.tokenizer:
